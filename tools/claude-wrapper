@@ -81,5 +81,10 @@ if [[ "$*" != *"-p"* && "$*" != *"--print"* ]]; then
     echo "🚀 Claude Yank Patcher v$SANDBOX_DIR - Emacs keybindings enabled"
 fi
 
+## disable autoupdater because it will wipe out the symlink in later versions.
+## https://code.claude.com/docs/en/settings
+export DISABLE_AUTOUPDATER=1
+
+
 # Forward all arguments to the CLI
 exec node "$CLI_PATH" "$@"
