@@ -62,15 +62,6 @@ Examples:
   ./install-wrapper --uninstall claude  # Remove installation`);
 }
 
-// PATH directories in order of preference (most user-specific first)
-const PATH_PREFERENCES = [
-    path.join(process.env.HOME || '', '.local', 'bin'),
-    path.join(process.env.HOME || '', 'bin'),
-    '/usr/local/bin',
-    '/opt/homebrew/bin', // Apple Silicon Macs
-    '/usr/bin',
-    '/bin'
-];
 
 function getPathDirectories() {
     const pathEnv = process.env.PATH || '';
@@ -82,30 +73,24 @@ function findWritablePathDirectories() {
     const writableDirs = [];
 
     for (const dir of pathDirs) {
-        try {
-            // Check if directory exists
-            if (!fs.existsSync(dir)) {
-                continue;
-            }
+        // NOTE: ~/.local/bin is excluded because claude itself will remove whatever is here named claude w/o warning
+        if (dir === path.join(process.env.HOME || '', '.local', 'bin')) {
+            continue;
+        }
 
-            // Check if directory is writable
-            fs.accessSync(dir, fs.constants.W_OK);
-            writableDirs.push(dir);
+        try {
+            // Check if directory exists and is writable
+            if (fs.existsSync(dir) && fs.accessSync(dir, fs.constants.W_OK) === undefined) {
+                writableDirs.push(dir);
+            }
         } catch (err) {
             // Directory doesn't exist or isn't writable
             continue;
         }
     }
 
-    // Sort by preference (user-specific directories first)
-    return writableDirs.sort((a, b) => {
-        const aPref = PATH_PREFERENCES.indexOf(a);
-        const bPref = PATH_PREFERENCES.indexOf(b);
-        if (aPref === -1 && bPref === -1) return 0;
-        if (aPref === -1) return 1;
-        if (bPref === -1) return -1;
-        return aPref - bPref;
-    });
+    // Return directories in PATH order (no artificial sorting)
+    return writableDirs;
 }
 
 function findInstallationDir() {
@@ -267,7 +252,7 @@ function installWrapper(options = {}) {
         const writableDirs = findWritablePathDirectories();
         if (writableDirs.length === 0) {
             error('No writable PATH directories found.');
-            info('Try creating ~/bin or ~/.local/bin and adding it to your PATH, or use --target-dir.');
+            info('Try creating ~/bin and adding it to your PATH, or use --target-dir.');
             process.exit(1);
         }
         targetDirectory = writableDirs[0];
@@ -278,7 +263,23 @@ function installWrapper(options = {}) {
     const wrapperSource = path.join(installDir, 'tools', 'claude-wrapper');
     const wrapperTarget = path.join(targetDirectory, name);
 
-    const isUpdate = fs.existsSync(wrapperTarget) || (fs.lstatSync(wrapperTarget, { throwIfNoEntry: false })?.isSymbolicLink() ?? false);
+    // Only consider it an update if it's our existing wrapper symlink
+    let isUpdate = false;
+    let isOurWrapper = false;
+
+    if (fs.existsSync(wrapperTarget)) {
+        try {
+            const stats = fs.lstatSync(wrapperTarget);
+            if (stats.isSymbolicLink()) {
+                const target = fs.readlinkSync(wrapperTarget);
+                isOurWrapper = target.includes('claude-yank-patcher') && target.includes('claude-wrapper');
+                isUpdate = isOurWrapper;
+            }
+        } catch (err) {
+            // Can't read symlink, assume it's not ours
+            isUpdate = false;
+        }
+    }
 
   if (isUpdate) {
         if (!dryRun) {
@@ -287,6 +288,10 @@ function installWrapper(options = {}) {
         } else {
             step('🔄', `Would update existing wrapper at: ${wrapperTarget}`);
         }
+    } else if (fs.existsSync(wrapperTarget) && !isOurWrapper) {
+        error(`A file already exists at ${wrapperTarget} that is not a Claude Yank Patcher wrapper.`);
+        error('Use --name to specify a different wrapper name, or remove the existing file manually.');
+        process.exit(1);
     } else {
         step('📋', 'Installing new wrapper...');
     }
@@ -432,7 +437,7 @@ function checkStatus() {
         success(`Writable PATH directories found: ${writableDirs.join(', ')}`);
     } else {
         warn('No writable PATH directories found.');
-        info('Consider creating ~/bin or ~/.local/bin and adding to PATH.');
+        info('Consider creating ~/bin and adding to PATH.');
     }
 
     step('🔍', 'Checking sandboxes...');
