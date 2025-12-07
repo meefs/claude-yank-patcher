@@ -235,6 +235,32 @@ function installWrapper(options = {}) {
     }
     success(`Found installation at: ${installDir}`);
 
+    // Validate version if specified
+    if (version) {
+        step('🔍', 'Validating version...');
+        const sandboxesDir = path.join(installDir, 'sandboxes');
+
+        if (!fs.existsSync(sandboxesDir)) {
+            error('No sandboxes directory found. Run ./patch-claude to install a sandbox first.');
+            process.exit(1);
+        }
+
+        try {
+            const availableVersions = fs.readdirSync(sandboxesDir);
+            if (!availableVersions.includes(version)) {
+                error(`Sandbox version ${version} not found.`);
+                info(`Available versions: ${availableVersions.sort().join(', ')}`);
+                info('Run ./patch-claude to install additional versions.');
+                process.exit(1);
+            }
+        } catch (err) {
+            error(`Cannot read sandboxes directory: ${err.message}`);
+            process.exit(1);
+        }
+
+        success(`Version ${version} is available`);
+    }
+
     step('🔍', 'Locating optimal PATH directory...');
     let targetDirectory;
 
@@ -249,13 +275,24 @@ function installWrapper(options = {}) {
             }
         }
     } else {
-        const writableDirs = findWritablePathDirectories();
-        if (writableDirs.length === 0) {
-            error('No writable PATH directories found.');
-            info('Try creating ~/bin and adding it to your PATH, or use --target-dir.');
-            process.exit(1);
+        // First check if there's an existing installation to update
+        const existingInstallations = findWrapperInstallations().filter(inst => inst.name === name);
+        if (existingInstallations.length > 0) {
+            // Use the existing installation directory regardless of writability
+            targetDirectory = existingInstallations[0].directory;
+            if (!dryRun) {
+                info(`Found existing installation at: ${targetDirectory}`);
+            }
+        } else {
+            // Find a new writable directory
+            const writableDirs = findWritablePathDirectories();
+            if (writableDirs.length === 0) {
+                error('No writable PATH directories found.');
+                info('Try creating ~/bin and adding it to your PATH, or use --target-dir.');
+                process.exit(1);
+            }
+            targetDirectory = writableDirs[0];
         }
-        targetDirectory = writableDirs[0];
     }
 
     success(`Using target directory: ${targetDirectory}`);
@@ -310,7 +347,8 @@ function installWrapper(options = {}) {
         if (version) {
             const versionFile = path.join(targetDirectory, '.claude-wrapper-version');
             fs.writeFileSync(versionFile, version);
-            success(`Pinned wrapper to version: ${version}`);
+            success(`Created version file: ${versionFile}`);
+            info(`Pinned wrapper to always use sandbox version: ${version}`);
         } else {
             // Remove version file if using latest
             const versionFile = path.join(targetDirectory, '.claude-wrapper-version');
@@ -325,9 +363,9 @@ function installWrapper(options = {}) {
     step('🎉', `${action} complete!`);
     info(`You can now run: ${name} --help`);
     if (version) {
-        info(`Wrapper pinned to version: ${version}`);
+        info(`Note: Wrapper will always use sandbox version ${version} regardless of newer installations`);
     } else {
-        info(`Wrapper uses the latest installed sandbox automatically.`);
+        info(`Wrapper automatically uses the latest installed sandbox`);
     }
 }
 
@@ -513,8 +551,11 @@ function parseArgs(argv) {
                     printHelp();
                     process.exit(1);
                 }
-                // If we have an action and no custom name set yet, treat this as a custom name
-                if (options.action === 'install' && options.name === 'claude') {
+                // Check if argument looks like a version number (x.y.z format)
+                const versionRegex = /^\d+\.\d+\.\d+$/;
+                if (options.action === 'install' && versionRegex.test(arg) && options.version === null) {
+                    options.version = arg;
+                } else if (options.action === 'install' && options.name === 'claude') {
                     options.name = arg;
                 } else if (options.action === 'uninstall' && options.name === 'claude') {
                     options.name = arg;
