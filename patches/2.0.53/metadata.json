@@ -1,0 +1,42 @@
+{
+  "version": "2.0.53",
+  "sandbox": "sandboxes/2.0.53",
+  "replacementsSource": "2.0.53",
+  "replacements": "patches/2.0.53/replacements.json",
+  "patchState": {
+    "version": "2.0.53",
+    "replacementsSource": "2.0.53",
+    "replacements": [
+      {
+        "label": "killBufferRef insertion with safer offset tracking (2.0.53)",
+        "search": "let N = H, q = E, w = H7.fromText(A, K, N), {",
+        "replace": "let N = H, q = E, killBufferRef = Pc.useRef(\"\"), lastKillEndOffsetRef = Pc.useRef(-1), recordKill = (DA1, newOffset) => { if (!DA1 || DA1.length === 0) return; if (newOffset !== -1 && w.offset === lastKillEndOffsetRef.current && DA1.includes('\\n')) { killBufferRef.current += DA1; } else { killBufferRef.current = DA1; } lastKillEndOffsetRef.current = newOffset; }, w = H7.fromText(A, K, N), {"
+      },
+      {
+        "label": "recordKill in reset helper",
+        "search": "    function v() {\n        if (A.trim() !== \"\") vb(A), J?.();\n        return H7.fromText(\"\", K, 0);\n    }",
+        "replace": "    function v() {\n        if (A.trim() !== \"\") vb(A), J?.();\n        lastKillEndOffsetRef.current = -1;\n        return H7.fromText(\"\", K, 0);\n    }"
+      },
+      {
+        "label": "Ctrl+K kill ring with safer append",
+        "search": "[ \"k\", r ]",
+        "replace": "[ \"k\", () => { let originalText = w.text, originalOffset = w.offset; let result = r(); let deletedLength = originalText.length - result.text.length; let deletedText = originalText.slice(originalOffset, originalOffset + deletedLength); recordKill(deletedText, result.offset); return result; } ]"
+      },
+      {
+        "label": "Ctrl+U kill ring with safer append",
+        "search": "[ \"u\", i ]",
+        "replace": "[ \"u\", () => { let K1 = w.text, j1 = w.offset, result = i(); recordKill(K1.slice(result.offset, j1), result.offset); return result; } ]"
+      },
+      {
+        "label": "Ctrl+W kill ring + yank with safer append",
+        "search": "[ \"w\", y ], [ \"y\", d ] ]),",
+        "replace": "[ \"w\", () => { let K1 = w.text, j1 = w.offset, result = y(); recordKill(K1.slice(result.offset, j1), result.offset); return result; } ], [ \"y\", () => killBufferRef.current ? w.insert(killBufferRef.current) : w ] ]),"
+      },
+      {
+        "label": "Meta+D kill ring with safer append",
+        "search": "[ \"d\", () => w.deleteWordAfter() ] ]);",
+        "replace": "[ \"d\", () => { let K1 = w.text, j1 = w.offset, endPos = w.endOfWord().right(), result = w.modifyText(endPos), z1 = endPos.offset - j1; if (z1 > 0) recordKill(K1.slice(j1, j1 + z1), result.offset); return result; } ] ]);"
+      }
+    ]
+  }
+}
